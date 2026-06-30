@@ -3,6 +3,7 @@ use std::fmt::Display;
 use crossterm::style::Stylize;
 use rand::RngExt;
 
+#[derive(Clone, Copy)]
 pub enum Suit {
     Hearts,
     Spades,

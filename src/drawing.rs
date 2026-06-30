@@ -8,7 +8,7 @@ use crossterm::{
 use crate::{
     card::{Card, Suit},
     configuration, game,
-    ui_state::{self, Slot},
+    ui_state::{self, Selection},
 };
 
 struct Cursor<'a, W: Write> {
@@ -32,26 +32,25 @@ impl<W: Write> Cursor<'_, W> {
     }
 
     pub fn draw_box(&mut self, w: u16, h: u16, color: Color) -> Result<(), Box<dyn Error>> {
-        let _ = crossterm::queue!(self.out, style::SetForegroundColor(color));
+        crossterm::queue!(self.out, style::SetForegroundColor(color))?;
         self.apply()?;
         let border_h = "─".repeat(w as usize);
-        write!(self.out, "┌{border_h}┐")?;
+        crossterm::queue!(self.out, style::Print(format!("┌{border_h}┐")))?;
         let mut y = 0;
         for _ in 1..=h - 1 {
             y += 1;
             self.offset(0, y)?;
             let empty = " ".repeat(w as usize);
-            write!(self.out, "│{empty}│")?;
+            crossterm::queue!(self.out, style::Print(format!("│{empty}│")))?;
         }
         y += 1;
         self.offset(0, y)?;
-        write!(self.out, "└{border_h}┘")?;
+        crossterm::queue!(self.out, style::Print(format!("└{border_h}┘")))?;
         Ok(())
     }
 
     fn draw_card_box(&mut self, color: Color) -> Result<(), Box<dyn Error>> {
-        self.draw_box(WIDTH, HEIGHT, color)?;
-        Ok(())
+        self.draw_box(WIDTH, HEIGHT, color)
     }
 
     fn draw_empty_slot(&mut self, is_selected: bool) -> Result<(), Box<dyn Error>> {
@@ -88,16 +87,16 @@ impl<W: Write> Cursor<'_, W> {
         crossterm::queue!(self.out, style::SetForegroundColor(color))?;
 
         self.offset(2, 1)?;
-        write!(self.out, "{}", card.rank)?;
+        crossterm::queue!(self.out, style::Print(card.rank.to_string()))?;
 
         self.offset(WIDTH - 1, 1)?;
-        write!(self.out, "{}", card.suit)?;
+        crossterm::queue!(self.out, style::Print(card.suit.to_string()))?;
 
         self.offset(2, HEIGHT - 1)?;
-        write!(self.out, "{}", card.suit)?;
+        crossterm::queue!(self.out, style::Print(card.suit.to_string()))?;
 
         self.offset(WIDTH - 1, HEIGHT - 1)?;
-        write!(self.out, "{}", card.rank)?;
+        crossterm::queue!(self.out, style::Print(card.rank.to_string()))?;
 
         Ok(())
     }
@@ -121,23 +120,23 @@ pub fn draw_state<W: Write>(
 
     // Stock
     if state.stock.len() > 0 {
-        cursor.draw_flipped_card(ui_state.selected == Slot::Stock)?;
+        cursor.draw_flipped_card(ui_state.selected == Selection::Stock)?;
         cursor.offset(WIDTH / 2 - 1, HEIGHT / 2)?;
-        write!(cursor.out, "({})", state.stock.len())?;
+        crossterm::queue!(cursor.out, style::Print(format!("({})", state.stock.len())))?;
     } else {
-        cursor.draw_empty_slot(ui_state.selected == Slot::Stock)?;
+        cursor.draw_empty_slot(ui_state.selected == Selection::Stock)?;
     }
 
     // Waste
     cursor.x += spacing_x;
-    cursor.draw_empty_slot(ui_state.selected == Slot::Waste)?;
+    cursor.draw_empty_slot(ui_state.selected == Selection::Waste)?;
     let waste_len = state.waste.len() as u8;
     for i in 0..configuration.waste_cards_to_show {
         if waste_len + i >= configuration.waste_cards_to_show {
             let index = waste_len + i - configuration.waste_cards_to_show;
             cursor.draw_card(
                 &state.waste[index as usize],
-                ui_state.selected == Slot::Waste && index == waste_len - 1,
+                ui_state.selected == Selection::Waste && index == waste_len - 1,
             )?;
             cursor.x += offset_x;
         }
@@ -146,7 +145,7 @@ pub fn draw_state<W: Write>(
     // Foundations
     cursor.x = x + spacing_x * 3;
     for i in 0..configuration.suits {
-        cursor.draw_empty_slot(ui_state.selected == Slot::Foundation(i))?;
+        cursor.draw_empty_slot(ui_state.selected == Selection::Foundation(i))?;
         cursor.x += spacing_x;
     }
 
@@ -155,12 +154,18 @@ pub fn draw_state<W: Write>(
     let mut i = 0;
     for column in &state.tableau {
         cursor.y = y + spacing_y;
-        for game::SidedCard { is_hidden, card } in column {
+        for (card_index, game::SidedCard { is_hidden, card }) in column.iter().enumerate() {
             if *is_hidden {
                 cursor.draw_flipped_card(false)?;
                 cursor.y += hidden_offset_y;
             } else {
-                cursor.draw_card(card, ui_state.selected == Slot::Tableau(i))?;
+                let selected = match ui_state.selected {
+                    Selection::Tableau { index, count } => {
+                        index == i && card_index >= column.len() - (count as usize)
+                    }
+                    _ => false,
+                };
+                cursor.draw_card(card, selected)?;
                 cursor.y += offset_y;
             }
         }
